@@ -1,71 +1,75 @@
 <template>
-  <div ref="editorContainer" class="editor-container"></div>
+  <div ref="containerRef" class="editor-container"></div>
+  <div v-if="!hasModel" class="empty-state">
+    <div class="empty-content">
+      <el-icon class="empty-icon"><Document /></el-icon>
+      <p>Select a file to edit</p>
+      <p class="hint">Open a folder from the explorer to get started</p>
+    </div>
+  </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, watch } from 'vue'
-import * as monaco from 'monaco-editor'
+import { ref, watch, onMounted } from 'vue'
+import { Document } from '@element-plus/icons-vue'
 
-const props = defineProps({
-  modelValue: {
-    type: String,
-    default: ''
-  },
-  language: {
-    type: String,
-    default: 'typescript'
-  }
-})
+const props = defineProps<{
+  hasModel: boolean
+}>()
 
-const emit = defineEmits(['update:modelValue', 'change'])
+const containerRef = ref<HTMLElement | null>(null)
 
-const editorContainer = ref<HTMLElement | null>(null)
-let editor: monaco.editor.IStandaloneCodeEditor | null = null
+const emit = defineEmits<{
+  (e: 'containerReady', el: HTMLElement): void
+}>()
 
 onMounted(() => {
-  if (editorContainer.value) {
-    editor = monaco.editor.create(editorContainer.value, {
-      value: props.modelValue,
-      language: props.language,
-      theme: 'vs-dark',
-      automaticLayout: true,
-      minimap: { enabled: true },
-      fontSize: 14,
-      fontFamily: "'Fira Code', Consolas, 'Courier New', monospace",
-      padding: { top: 10 }
-    })
-
-    editor.onDidChangeModelContent(() => {
-      const value = editor?.getValue()
-      emit('update:modelValue', value)
-      emit('change', value)
-    })
+  if (containerRef.value) {
+    emit('containerReady', containerRef.value)
   }
 })
 
-watch(() => props.modelValue, (newValue) => {
-  if (editor && editor.getValue() !== newValue) {
-    editor.setValue(newValue)
-  }
-})
-
-watch(() => props.language, (newLang) => {
-  if (editor) {
-    monaco.editor.setModelLanguage(editor.getModel()!, newLang)
-  }
-})
-
-onBeforeUnmount(() => {
-  if (editor) {
-    editor.dispose()
+watch(() => containerRef.value, (el) => {
+  if (el) {
+    emit('containerReady', el)
   }
 })
 </script>
 
 <style scoped>
 .editor-container {
-  width: 100%;
-  height: 100%;
+  position: absolute;
+  inset: 0;
   overflow: hidden;
+}
+
+.empty-state {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: #1e1e1e;
+}
+
+.empty-content {
+  text-align: center;
+  color: #555;
+}
+
+.empty-icon {
+  font-size: 48px;
+  margin-bottom: 16px;
+  color: #444;
+}
+
+.empty-content p {
+  margin: 4px 0;
+  font-size: 14px;
+}
+
+.hint {
+  font-size: 12px !important;
+  color: #444 !important;
 }
 </style>

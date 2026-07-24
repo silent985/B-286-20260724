@@ -1,94 +1,204 @@
 <template>
   <el-container class="layout-container">
     <el-aside width="250px" class="sidebar">
-      <div class="sidebar-header drag-region">EXPLORER</div>
-      <el-tree :data="fileTree" :props="defaultProps" @node-click="handleNodeClick" class="file-tree" />
+      <FileTree
+        :file-tree="fileTree"
+        :workspace-name="workspaceDisplayName"
+        @file-click="handleFileClick"
+        @open-folder="handleOpenFolder"
+      />
     </el-aside>
-    
-    <el-container>
-      <el-header height="35px" class="editor-header drag-region">
-        <div v-for="file in openFiles" :key="file.id" 
-             class="tab no-drag" :class="{ active: currentFile?.id === file.id }"
-             @click="loadFile(file)">
-          {{ file.label }}
-          <span class="close-icon" @click.stop="closeFile(file)">×</span>
-        </div>
-      </el-header>
-      
+
+    <el-container class="editor-area">
+      <div v-if="tabs.length > 0" class="tabs-header drag-region">
+        <EditorTabs
+          :tabs="tabs"
+          :active-tab-id="activeTabId"
+          @activate="activateTab"
+          @close="handleCloseTab"
+        />
+      </div>
+      <div v-else class="tabs-header-empty drag-region"></div>
+
       <el-main class="editor-main">
-        <CodeEditor v-if="currentFile" v-model="currentFile.content" :language="currentFile.language" />
-        <div v-else class="empty-state">Select a file to edit</div>
+        <CodeEditor
+          :has-model="!!activeTab?.model"
+          @container-ready="handleEditorReady"
+        />
       </el-main>
-      
+
       <el-footer height="25px" class="status-bar">
-        <div class="status-item">main*</div>
-        <div class="status-item">{{ currentFile?.language || 'Plain Text' }}</div>
-        <div class="status-item right">Ln 1, Col 1</div>
+        <div class="status-item">{{ workspaceDisplayName || 'No workspace' }}</div>
+        <div class="status-item">{{ activeTab?.language || 'Plain Text' }}</div>
+        <div class="status-item right">Ln {{ cursorPosition.line }}, Col {{ cursorPosition.column }}</div>
       </el-footer>
     </el-container>
   </el-container>
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, onMounted, onBeforeUnmount } from 'vue'
+import { ElMessageBox, ElMessage } from 'element-plus'
+import * as monaco from 'monaco-editor'
+import FileTree from './components/FileTree.vue'
+import EditorTabs from './components/EditorTabs.vue'
 import CodeEditor from './components/CodeEditor.vue'
+import { useWorkspace } from './composables/useWorkspace'
+import { useEditorTabs } from './composables/useEditorTabs'
+import { useMonacoEditor } from './composables/useMonacoEditor'
+import type { FileTreeNode } from './types/workspace'
 
-interface FileNode {
-  id: number
-  label: string
-  children?: FileNode[]
-  content?: string
-  language?: string
+const { workspacePath, fileTree, openFolder, getWorkspaceName } = useWorkspace()
+
+const {
+  tabs,
+  activeTabId,
+  activeTab,
+  hasDirtyTabs,
+  getDirtyTabNames,
+  openFile,
+  activateTab,
+  removeTab,
+  saveTab,
+  saveActiveTab,
+  saveAllDirty,
+  markDirty,
+  getTab,
+  closeAllTabs,
+} = useEditorTabs()
+
+const { cursorPosition, initEditor, addAction, disposeEditor } = useMonacoEditor(
+  () => activeTab.value,
+  (tabId: string) => markDirty(tabId),
+)
+
+const workspaceDisplayName = computed(() => {
+  if (!workspacePath.value) return ''
+  return getWorkspaceName()
+})
+
+const handleOpenFolder = async () => {
+  await openFolder()
 }
 
-const fileTree = ref<FileNode[]>([
-  {
-    id: 1,
-    label: 'src',
-    children: [
-      { id: 2, label: 'App.vue', language: 'html', content: '<template>\n  <div>Hello World</div>\n</template>' },
-      { id: 3, label: 'main.ts', language: 'typescript', content: "import { createApp } from 'vue'\nimport App from './App.vue'\n\ncreateApp(App).mount('#app')" },
-      { id: 4, label: 'style.css', language: 'css', content: 'body { background: #000; }' },
-    ]
-  },
-  {
-    id: 5,
-    label: 'package.json',
-    language: 'json',
-    content: '{\n  "name": "monaco-editor-app"\n}'
+const handleFileClick = async (node: FileTreeNode) => {
+  if (node.isDirectory) return
+  const tab = await openFile(node.path, node.name)
+  if (!tab) {
+    ElMessage.error(`Failed to open "${node.name}" — it may be a binary file.`)
   }
-])
-
-const defaultProps = {
-  children: 'children',
-  label: 'label',
 }
 
-const openFiles = ref<FileNode[]>([])
-const currentFile = ref<FileNode | null>(null)
+const handleEditorReady = (el: HTMLElement) => {
+  initEditor(el)
+}
 
-const handleNodeClick = (data: FileNode) => {
-  if (!data.children) {
-    loadFile(data)
+const handleCloseTab = async (tabId: string) => {
+  const tab = getTab(tabId)
+  if (!tab) return
+
+  if (!tab.isDirty) {
+    removeTab(tabId)
+    return
   }
-}
 
-const loadFile = (file: FileNode) => {
-  if (!openFiles.value.find(f => f.id === file.id)) {
-    openFiles.value.push(file)
-  }
-  currentFile.value = file
-}
+  try {
+    const action = await ElMessageBox.confirm(
+      `"${tab.fileName}" has unsaved changes. Do you want to save?`,
+      'Unsaved Changes',
+      {
+        confirmButtonText: 'Save',
+        cancelButtonText: "Don't Save",
+        distinguishCancelAndClose: true,
+        type: 'warning',
+        closeOnClickModal: false,
+      },
+    )
 
-const closeFile = (file: FileNode) => {
-  const index = openFiles.value.findIndex(f => f.id === file.id)
-  if (index !== -1) {
-    openFiles.value.splice(index, 1)
-    if (currentFile.value?.id === file.id) {
-      currentFile.value = openFiles.value[openFiles.value.length - 1] || null
+    if (action === 'confirm') {
+      const saved = await saveTab(tabId)
+      if (saved) {
+        removeTab(tabId)
+      } else {
+        ElMessage.error(`Failed to save "${tab.fileName}". The file may be read-only or locked.`)
+      }
+    }
+  } catch (action) {
+    if (action === 'cancel') {
+      removeTab(tabId)
     }
   }
 }
+
+const handleWindowClose = async () => {
+  if (!hasDirtyTabs.value) {
+    window.workspace.confirmClose()
+    return
+  }
+
+  const dirtyNames = getDirtyTabNames()
+  const message = dirtyNames.length === 1
+    ? `"${dirtyNames[0]}" has unsaved changes. Save before exiting?`
+    : `${dirtyNames.length} files have unsaved changes:\n${dirtyNames.map(n => `• ${n}`).join('\n')}\n\nSave all before exiting?`
+
+  try {
+    const action = await ElMessageBox.confirm(
+      message,
+      'Unsaved Changes',
+      {
+        confirmButtonText: 'Save All',
+        cancelButtonText: "Don't Save",
+        distinguishCancelAndClose: true,
+        type: 'warning',
+        closeOnClickModal: false,
+      },
+    )
+
+    if (action === 'confirm') {
+      const result = await saveAllDirty()
+      if (result.success) {
+        window.workspace.confirmClose()
+      } else {
+        ElMessage.error(
+          `Failed to save: ${result.failedFiles.join(', ')}. Files may be read-only or locked.`,
+        )
+      }
+    }
+  } catch (action) {
+    if (action === 'cancel') {
+      window.workspace.confirmClose()
+    }
+  }
+}
+
+let closeListener: (() => void) | null = null
+
+onMounted(() => {
+  addAction({
+    id: 'save-file',
+    label: 'Save File',
+    keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS],
+    run: async () => {
+      const saved = await saveActiveTab()
+      if (!saved && activeTabId.value) {
+        const tab = getTab(activeTabId.value)
+        if (tab) {
+          ElMessage.error(`Failed to save "${tab.fileName}". The file may be read-only or locked.`)
+        }
+      }
+    },
+  })
+
+  closeListener = window.workspace.onCloseRequest(() => {
+    handleWindowClose()
+  })
+})
+
+onBeforeUnmount(() => {
+  closeListener?.()
+  closeAllTabs()
+  disposeEditor()
+})
 </script>
 
 <style scoped>
@@ -102,90 +212,30 @@ const closeFile = (file: FileNode) => {
   border-right: 1px solid #1e1e1e;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
-.sidebar-header {
-  padding: 10px;
-  font-size: 11px;
-  font-weight: bold;
-  color: #bbbbbb;
-  background-color: #252526;
-}
-
-.file-tree {
-  background-color: transparent;
-  color: #cccccc;
-}
-
-:deep(.el-tree-node__content:hover) {
-  background-color: #2a2d2e;
-}
-
-:deep(.el-tree-node:focus > .el-tree-node__content) {
-  background-color: #37373d;
-}
-
-.editor-header {
-  background-color: #252526;
+.editor-area {
   display: flex;
-  padding: 0;
-  border-bottom: 1px solid #1e1e1e;
-  overflow-x: auto;
+  flex-direction: column;
 }
 
-.tab {
-  padding: 0 15px;
+.tabs-header {
+  flex-shrink: 0;
+}
+
+.tabs-header-empty {
   height: 35px;
-  display: flex;
-  align-items: center;
-  font-size: 13px;
-  color: #969696;
-  cursor: pointer;
-  border-right: 1px solid #1e1e1e;
-  background-color: #2d2d2d;
-  min-width: 100px;
-  justify-content: space-between;
-}
-
-.tab.active {
-  background-color: #1e1e1e;
-  color: #ffffff;
-  border-top: 1px solid #007acc; /* VSCode active tab indicator */
-}
-
-.close-icon {
-  margin-left: 8px;
-  font-size: 14px;
-  opacity: 0;
-  border-radius: 3px;
-  width: 16px;
-  height: 16px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.tab:hover .close-icon {
-  opacity: 1;
-}
-
-.close-icon:hover {
-  background-color: #4e4e4e;
-  color: white;
+  background-color: #252526;
+  border-bottom: 1px solid #1e1e1e;
 }
 
 .editor-main {
   padding: 0;
   overflow: hidden;
   background-color: #1e1e1e;
-}
-
-.empty-state {
-  height: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #555;
+  position: relative;
+  flex: 1;
 }
 
 .status-bar {
@@ -195,12 +245,12 @@ const closeFile = (file: FileNode) => {
   align-items: center;
   padding: 0 10px;
   font-size: 12px;
-  justify-content: space-between;
+  flex-shrink: 0;
 }
 
 .status-item {
   margin-right: 15px;
-  cursor: pointer;
+  cursor: default;
 }
 
 .status-item.right {
