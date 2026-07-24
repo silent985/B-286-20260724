@@ -6,59 +6,63 @@
 import { ref, onMounted, onBeforeUnmount, watch } from 'vue'
 import * as monaco from 'monaco-editor'
 
-const props = defineProps({
-  modelValue: {
-    type: String,
-    default: ''
-  },
-  language: {
-    type: String,
-    default: 'typescript'
-  }
-})
+const props = defineProps<{
+  model: monaco.editor.ITextModel | null
+}>()
 
-const emit = defineEmits(['update:modelValue', 'change'])
+const emit = defineEmits<{
+  (e: 'cursor-change', position: { lineNumber: number; column: number }): void
+}>()
 
 const editorContainer = ref<HTMLElement | null>(null)
 let editor: monaco.editor.IStandaloneCodeEditor | null = null
+let cursorDisposable: monaco.IDisposable | null = null
 
 onMounted(() => {
-  if (editorContainer.value) {
-    editor = monaco.editor.create(editorContainer.value, {
-      value: props.modelValue,
-      language: props.language,
-      theme: 'vs-dark',
-      automaticLayout: true,
-      minimap: { enabled: true },
-      fontSize: 14,
-      fontFamily: "'Fira Code', Consolas, 'Courier New', monospace",
-      padding: { top: 10 }
-    })
+  if (!editorContainer.value) return
 
-    editor.onDidChangeModelContent(() => {
-      const value = editor?.getValue()
-      emit('update:modelValue', value)
-      emit('change', value)
-    })
+  editor = monaco.editor.create(editorContainer.value, {
+    theme: 'vs-dark',
+    automaticLayout: true,
+    minimap: { enabled: true },
+    fontSize: 14,
+    fontFamily: "'Fira Code', Consolas, 'Courier New', monospace",
+    padding: { top: 10 },
+    model: props.model ?? undefined,
+  })
+
+  cursorDisposable = editor.onDidChangeCursorPosition((e) => {
+    emit('cursor-change', { lineNumber: e.position.lineNumber, column: e.position.column })
+  })
+
+  const pos = editor.getPosition()
+  if (pos) {
+    emit('cursor-change', { lineNumber: pos.lineNumber, column: pos.column })
   }
 })
 
-watch(() => props.modelValue, (newValue) => {
-  if (editor && editor.getValue() !== newValue) {
-    editor.setValue(newValue)
-  }
-})
-
-watch(() => props.language, (newLang) => {
-  if (editor) {
-    monaco.editor.setModelLanguage(editor.getModel()!, newLang)
-  }
-})
+watch(
+  () => props.model,
+  (newModel) => {
+    if (!editor) return
+    const current = editor.getModel()
+    if (current === newModel) return
+    editor.setModel(newModel)
+    const pos = editor.getPosition()
+    if (pos) {
+      emit('cursor-change', { lineNumber: pos.lineNumber, column: pos.column })
+    }
+  },
+)
 
 onBeforeUnmount(() => {
-  if (editor) {
-    editor.dispose()
-  }
+  cursorDisposable?.dispose()
+  editor?.dispose()
+  editor = null
+})
+
+defineExpose({
+  getEditor: () => editor,
 })
 </script>
 
