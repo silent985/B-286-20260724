@@ -1,24 +1,26 @@
 import { contextBridge, ipcRenderer } from 'electron'
+import type { FileNode, CloseDecision } from '../src/types/file'
 
-// --------- Expose some API to the Renderer process ---------
-contextBridge.exposeInMainWorld('ipcRenderer', {
-  on(...args: Parameters<typeof ipcRenderer.on>) {
-    const [channel, listener] = args
-    return ipcRenderer.on(channel, (event, ...args) => listener(event, ...args))
-  },
-  off(...args: Parameters<typeof ipcRenderer.off>) {
-    const [channel, ...omit] = args
-    return ipcRenderer.off(channel, ...omit)
-  },
-  send(...args: Parameters<typeof ipcRenderer.send>) {
-    const [channel, ...omit] = args
-    return ipcRenderer.send(channel, ...omit)
-  },
-  invoke(...args: Parameters<typeof ipcRenderer.invoke>) {
-    const [channel, ...omit] = args
-    return ipcRenderer.invoke(channel, ...omit)
+contextBridge.exposeInMainWorld('workspace', {
+  openFolder: (): Promise<string | null> =>
+    ipcRenderer.invoke('dialog:openFolder'),
+
+  readDir: (dirPath: string): Promise<FileNode[]> =>
+    ipcRenderer.invoke('workspace:readDir', dirPath),
+
+  readFile: (filePath: string): Promise<string> =>
+    ipcRenderer.invoke('workspace:readFile', filePath),
+
+  writeFile: (filePath: string, content: string): Promise<void> =>
+    ipcRenderer.invoke('workspace:writeFile', filePath, content),
+
+  onCloseQuery: (callback: () => void | Promise<void>): (() => void) => {
+    const listener = () => callback()
+    ipcRenderer.on('workspace:closeQuery', listener)
+    return () => ipcRenderer.off('workspace:closeQuery', listener)
   },
 
-  // You can expose other apts you need here.
-  // ...
+  respondCloseDecision: (decision: CloseDecision): void => {
+    ipcRenderer.send('workspace:closeResponse', decision)
+  },
 })
