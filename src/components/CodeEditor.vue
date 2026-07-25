@@ -3,62 +3,92 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, watch } from 'vue'
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import * as monaco from 'monaco-editor'
+import type { EditorTab } from '../composables/useEditorTabs'
 
-const props = defineProps({
-  modelValue: {
-    type: String,
-    default: ''
-  },
-  language: {
-    type: String,
-    default: 'typescript'
-  }
-})
+/**
+ * Thin wrapper around a single Monaco editor instance. Tabs are represented by
+ * their own `ITextModel`; this component simply swaps the active model in and
+ * out, preserving each tab's view state (cursor + scroll) across switches.
+ */
+const props = defineProps<{
+  /** The tab whose model should currently be displayed, or `null` for none. */
+  tab: EditorTab | null
+}>()
 
-const emit = defineEmits(['update:modelValue', 'change'])
+const emit = defineEmits<{
+  (event: 'cursor-change', position: { line: number; column: number }): void
+  (event: 'save'): void
+}>()
 
 const editorContainer = ref<HTMLElement | null>(null)
 let editor: monaco.editor.IStandaloneCodeEditor | null = null
+/** The tab currently bound to the editor, so we can persist its view state. */
+let boundTab: EditorTab | null = null
+
+/** Detach the current model, saving its view state back onto the tab. */
+function detachCurrent(): void {
+  if (editor && boundTab) {
+    boundTab.viewState = editor.saveViewState()
+  }
+  boundTab = null
+}
+
+/** Bind a tab's model to the editor and restore its saved view state. */
+function attach(tab: EditorTab | null): void {
+  if (!editor) return
+  detachCurrent()
+
+  if (!tab) {
+    editor.setModel(null)
+    return
+  }
+
+  editor.setModel(tab.model)
+  if (tab.viewState) {
+    editor.restoreViewState(tab.viewState)
+  }
+  editor.focus()
+  boundTab = tab
+}
 
 onMounted(() => {
-  if (editorContainer.value) {
-    editor = monaco.editor.create(editorContainer.value, {
-      value: props.modelValue,
-      language: props.language,
-      theme: 'vs-dark',
-      automaticLayout: true,
-      minimap: { enabled: true },
-      fontSize: 14,
-      fontFamily: "'Fira Code', Consolas, 'Courier New', monospace",
-      padding: { top: 10 }
+  if (!editorContainer.value) return
+
+  editor = monaco.editor.create(editorContainer.value, {
+    model: null,
+    theme: 'vs-dark',
+    automaticLayout: true,
+    minimap: { enabled: true },
+    fontSize: 14,
+    fontFamily: "'Fira Code', Consolas, 'Courier New', monospace",
+    padding: { top: 10 },
+  })
+
+  editor.onDidChangeCursorPosition((event) => {
+    emit('cursor-change', {
+      line: event.position.lineNumber,
+      column: event.position.column,
     })
+  })
 
-    editor.onDidChangeModelContent(() => {
-      const value = editor?.getValue()
-      emit('update:modelValue', value)
-      emit('change', value)
-    })
-  }
+  editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
+    emit('save')
+  })
+
+  attach(props.tab)
 })
 
-watch(() => props.modelValue, (newValue) => {
-  if (editor && editor.getValue() !== newValue) {
-    editor.setValue(newValue)
-  }
-})
-
-watch(() => props.language, (newLang) => {
-  if (editor) {
-    monaco.editor.setModelLanguage(editor.getModel()!, newLang)
-  }
-})
+watch(
+  () => props.tab,
+  (tab) => attach(tab),
+)
 
 onBeforeUnmount(() => {
-  if (editor) {
-    editor.dispose()
-  }
+  detachCurrent()
+  editor?.dispose()
+  editor = null
 })
 </script>
 
