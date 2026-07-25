@@ -1,0 +1,53 @@
+const EXTENSION_MAP: Record<string, string> = {
+  ts: 'typescript',
+  tsx: 'typescript',
+  mts: 'typescript',
+  cts: 'typescript',
+  js: 'javascript',
+  jsx: 'javascript',
+  mjs: 'javascript',
+  cjs: 'javascript',
+  vue: 'html',
+  html: 'html',
+  htm: 'html',
+  css: 'css',
+  scss: 'scss',
+  less: 'less',
+  json: 'json',
+  md: 'markdown',
+  markdown: 'markdown',
+  py: 'python',
+  java: 'java',
+  go: 'go',
+  rs: 'rust',
+  c: 'c',
+  h: 'c',
+  cpp: 'cpp',
+  cc: 'cpp',
+  cxx: 'cpp',
+  hpp: 'cpp',
+  cs: 'csharp',
+  php: 'php',
+  rb: 'ruby',
+  swift: 'swift',
+  kt: 'kotlin',
+  kts: 'kotlin',
+  sql: 'sql',
+  sh: 'shell',
+  bash: 'shell',
+  zsh: 'shell',
+  yml: 'yaml',
+  yaml: 'yaml',
+  xml: 'xml',
+  svg: 'xml',
+  toml: 'ini',
+  ini: 'ini',
+  txt: 'plaintext',
+}
+
+export function getLanguageFromFilename(filename: string): string {
+  const dotIndex = filename.lastIndexOf('.')
+  if (dotIndex === -1) return 'plaintext'
+  const ext = filename.slice(dotIndex + 1).toLowerCase()
+  return EXTENSION_MAP[ext] ?? 'plaintext'
+}
