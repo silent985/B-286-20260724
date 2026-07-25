@@ -1,24 +1,21 @@
 import { contextBridge, ipcRenderer } from 'electron'
 
-// --------- Expose some API to the Renderer process ---------
-contextBridge.exposeInMainWorld('ipcRenderer', {
-  on(...args: Parameters<typeof ipcRenderer.on>) {
-    const [channel, listener] = args
-    return ipcRenderer.on(channel, (event, ...args) => listener(event, ...args))
-  },
-  off(...args: Parameters<typeof ipcRenderer.off>) {
-    const [channel, ...omit] = args
-    return ipcRenderer.off(channel, ...omit)
-  },
-  send(...args: Parameters<typeof ipcRenderer.send>) {
-    const [channel, ...omit] = args
-    return ipcRenderer.send(channel, ...omit)
-  },
-  invoke(...args: Parameters<typeof ipcRenderer.invoke>) {
-    const [channel, ...omit] = args
-    return ipcRenderer.invoke(channel, ...omit)
-  },
+interface FileTreeNode {
+  name: string
+  path: string
+  isDirectory: boolean
+  children?: FileTreeNode[]
+}
 
-  // You can expose other apts you need here.
-  // ...
+contextBridge.exposeInMainWorld('workspace', {
+  openFolder: (): Promise<string | null> => ipcRenderer.invoke('dialog:openFolder'),
+  readDirectory: (dirPath: string): Promise<FileTreeNode[]> => ipcRenderer.invoke('fs:readDirectory', dirPath),
+  readFile: (filePath: string): Promise<string> => ipcRenderer.invoke('fs:readFile', filePath),
+  writeFile: (filePath: string, content: string): Promise<void> => ipcRenderer.invoke('fs:writeFile', filePath, content),
+  confirmClose: (): void => ipcRenderer.send('app:confirmClose'),
+  onCloseRequest: (callback: () => void): (() => void) => {
+    const handler = () => callback()
+    ipcRenderer.on('app-close-request', handler)
+    return () => ipcRenderer.off('app-close-request', handler)
+  },
 })
